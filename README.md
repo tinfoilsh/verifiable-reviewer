@@ -4,7 +4,7 @@ A Tinfoil-attested container that reviews a release diff with an LLM and publish
 
 ## Why
 
-A reviewer running outside a TEE produces an opinion. A reviewer running inside one produces a cryptographic claim: _this exact diff was reviewed by this exact code, and this is what it concluded._ Anyone can later verify the claim from the Rekor entry without trusting Tinfoil.
+Prove _this exact diff was reviewed by this exact prompt, and this is what it concluded._ Anyone can later verify the claim from the Rekor entry without trusting Tinfoil.
 
 ## API
 
@@ -27,6 +27,7 @@ Response: a DSSE envelope + Rekor coordinates (`log_index`, `uuid`, fetch URL). 
 The signed in-toto Statement (`predicateType: https://tinfoil.sh/predicate/code-review/v1`) contains:
 
 - `subject.digest.sha256` — hash of the diff bytes
+- `predicate.diff` — the full unified diff the LLM actually reviewed (so the envelope is self-contained; verifiers don't need to re-fetch from GitHub to inspect what was judged)
 - `predicate.review_text` / `malicious` / `malicious_reasoning` — LLM judgment
 - `predicate.model` — model name
 - `predicate.tinfoil_attestation` — the full boot-time hardware attestation document
