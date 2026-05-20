@@ -35,13 +35,13 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return &Config{
-		ListenAddr:     envOr("LISTEN_ADDR", ":8080"),
-		TinfoilAPIKey:  tinfoilKey,
-		ReviewerAPIKey: reviewerKey,
-		LLMURL:         envOr("LLM_URL", "https://inference.tinfoil.sh/v1/chat/completions"),
-		LLMModel:       envOr("LLM_MODEL", "gpt-oss-120b"),
-		RekorURL:       envOr("REKOR_URL", "https://rekor.sigstore.dev"),
-		TLSKeyPath:      envOr("TLS_KEY_PATH", "/tinfoil/tls.key"),
+		ListenAddr:      envOr("LISTEN_ADDR", ":8080"),
+		TinfoilAPIKey:   tinfoilKey,
+		ReviewerAPIKey:  reviewerKey,
+		LLMURL:          envOr("LLM_URL", "https://inference.tinfoil.sh/v1/chat/completions"),
+		LLMModel:        envOr("LLM_MODEL", "gpt-oss-120b"),
+		RekorURL:        envOr("REKOR_URL", "https://rekor.sigstore.dev"),
+		TLSKeyPath:      envOr("TLS_KEY_PATH", "/tinfoil-app/tls.key"),
 		AttestationPath: envOr("ATTESTATION_PATH", "/tinfoil/attestation.json"),
 	}, nil
 }

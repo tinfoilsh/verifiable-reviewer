@@ -29,12 +29,13 @@ func main() {
 
 	llm := NewLLMClient(cfg)
 	publisher := NewPublisher(signer, cfg.RekorURL)
+	gh := NewGitHubFetcher()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	mux.Handle("/review", requireAPIKey(cfg.ReviewerAPIKey, handleReview(llm, publisher)))
+	mux.Handle("/review", requireAPIKey(cfg.ReviewerAPIKey, handleReview(gh, llm, publisher)))
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -60,21 +61,17 @@ func requireAPIKey(want string, next http.Handler) http.Handler {
 	})
 }
 
-// reviewRequest is the wire format on POST /review.
+// reviewRequest is the wire format on POST /review. The diff is fetched
+// inside the enclave from github.com/<repo>/compare/<prev>...<latest>.diff,
+// so the subject hash is over bytes the TEE pulled itself — not bytes a
+// caller could have substituted.
 type reviewRequest struct {
 	Repo      string `json:"repo"`
 	PrevTag   string `json:"prev_tag"`
 	LatestTag string `json:"latest_tag"`
-	// Diff is the unified diff as a single string. The hash of this exact
-	// byte sequence is what ends up in the signed attestation's subject.
-	Diff string `json:"diff"`
-	// Files mirrors the visibility/llm.py packaging — list of {path, patch}
-	// entries the LLM gets. The reviewer uses Files for the prompt and Diff
-	// for the subject hash; callers should derive both from the same source.
-	Files []File `json:"files"`
 }
 
-func handleReview(llm *LLMClient, publisher *Publisher) http.Handler {
+func handleReview(gh *GitHubFetcher, llm *LLMClient, publisher *Publisher) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "POST only")
@@ -86,16 +83,28 @@ func handleReview(llm *LLMClient, publisher *Publisher) http.Handler {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON: %v", err))
 			return
 		}
-		if req.Repo == "" || req.LatestTag == "" || len(req.Files) == 0 || req.Diff == "" {
-			writeError(w, http.StatusBadRequest, "repo, latest_tag, diff, and files are required")
+		if req.Repo == "" || req.PrevTag == "" || req.LatestTag == "" {
+			writeError(w, http.StatusBadRequest, "repo, prev_tag, and latest_tag are required")
 			return
 		}
 
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 		defer cancel()
 
+		diffBytes, err := gh.FetchDiff(ctx, req.Repo, req.PrevTag, req.LatestTag)
+		if err != nil {
+			log.Printf("review %s %s→%s: fetch: %v", req.Repo, req.PrevTag, req.LatestTag, err)
+			writeError(w, http.StatusBadGateway, "diff fetch failed")
+			return
+		}
+		files := splitUnifiedDiff(diffBytes)
+		if len(files) == 0 {
+			writeError(w, http.StatusUnprocessableEntity, "diff contained no file changes")
+			return
+		}
+
 		rctx := &ReviewContext{Repo: req.Repo, Prev: req.PrevTag, Latest: req.LatestTag}
-		result, err := llm.SummarizeDiff(ctx, req.Files, rctx)
+		result, err := llm.SummarizeDiff(ctx, files, rctx)
 		if err != nil {
 			log.Printf("review %s %s→%s: llm: %v", req.Repo, req.PrevTag, req.LatestTag, err)
 			writeError(w, http.StatusBadGateway, "llm call failed")
@@ -106,7 +115,7 @@ func handleReview(llm *LLMClient, publisher *Publisher) http.Handler {
 			Repo:      req.Repo,
 			PrevTag:   req.PrevTag,
 			LatestTag: req.LatestTag,
-			DiffBytes: []byte(req.Diff),
+			DiffBytes: diffBytes,
 			Result:    result,
 		})
 		if err != nil {

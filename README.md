@@ -4,7 +4,7 @@ A Tinfoil-attested container that reviews a release diff with an LLM and publish
 
 ## Why
 
-A reviewer running outside a TEE produces an opinion. A reviewer running inside one produces a cryptographic claim: *this exact diff was reviewed by this exact code, and this is what it concluded.* Anyone can later verify the claim from the Rekor entry without trusting Tinfoil.
+A reviewer running outside a TEE produces an opinion. A reviewer running inside one produces a cryptographic claim: _this exact diff was reviewed by this exact code, and this is what it concluded._ Anyone can later verify the claim from the Rekor entry without trusting Tinfoil.
 
 ## API
 
@@ -14,13 +14,11 @@ A reviewer running outside a TEE produces an opinion. A reviewer running inside 
 {
   "repo": "tinfoilsh/cvmimage",
   "prev_tag": "v0.4.1",
-  "latest_tag": "v0.4.2",
-  "diff": "<unified diff text>",
-  "files": [{"path": "...", "patch": "..."}]
+  "latest_tag": "v0.4.2"
 }
 ```
 
-`diff` is hashed as the in-toto subject; `files` is the LLM input. Callers should derive both from the same source — re-deriving the hash later proves the attestation covered the same bytes.
+The reviewer fetches `https://github.com/<repo>/compare/<prev_tag>...<latest_tag>.diff` itself and hashes those bytes as the in-toto subject. The caller never supplies the diff, so the attestation can't be tricked into signing over bytes that don't match the named commit range — a verifier re-fetching the same URL gets the same bytes and re-derives the same hash.
 
 Response: a DSSE envelope + Rekor coordinates (`log_index`, `uuid`, fetch URL). A `202` instead of `200` means the envelope is signed but Rekor publication failed; the envelope can be retried out of band.
 
@@ -46,7 +44,7 @@ Steps 2 + 4 prove the signature came from a key that lived inside the measured e
 
 - TLS key is bind-mounted at `/tinfoil/tls.key` because `tinfoil-config.yml` sets `enable-app-signing: true`. Container compromise leaks the key — opt-in is intentional.
 - Boot-time attestation document is read once at startup from `/tinfoil/attestation.json` and embedded verbatim in every signed envelope. No per-request shim round-trip.
-- Outbound network: `inference.tinfoil.sh` (LLM) and `rekor.sigstore.dev` (publishing).
+- Outbound network: `inference.tinfoil.sh` (LLM), `rekor.sigstore.dev` (publishing), and `github.com` + `codeload.github.com` (diff fetch — the compare URL 302s from the former to the latter).
 
 ## Configuration
 
