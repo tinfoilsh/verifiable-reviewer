@@ -16,9 +16,12 @@ containers:
   - name: "verifiable-reviewer"
     image: "ghcr.io/tinfoilsh/verifiable-reviewer@sha256:0000000000000000000000000000000000000000000000000000000000000000" # placeholder; update-container-action overwrites this
     networks: [web]
+    user: "0:0" # run as root so we can read the 0600 TLS key bind-mounted below
     secrets:
       - TINFOIL_API_KEY
       - REVIEWER_API_KEY
+    volumes:
+      - /mnt/ramdisk/private/tls/key.pem:/tinfoil-app/tls.key:ro # boot-time TLS key for in-container signing
 
 shim:
   listen-port: 443
@@ -27,4 +30,3 @@ shim:
     - /review
     - /healthz
   authenticated: false # /review enforces its own bearer-token; shim auth would double-charge keys
-  enable-app-signing: true # bind-mount TLS key at /tinfoil/tls.key for in-container signing
