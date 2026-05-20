@@ -38,7 +38,6 @@ type reviewPredicate struct {
 	PrevTag            string          `json:"prev_tag"`
 	LatestTag          string          `json:"latest_tag"`
 	DiffSHA256         string          `json:"diff_sha256"`
-	Diff               string          `json:"diff"`
 	ReviewText         string          `json:"review_text"`
 	Malicious          string          `json:"malicious"`
 	MaliciousReasoning string          `json:"malicious_reasoning"`
@@ -111,7 +110,6 @@ func (p *Publisher) PublishReview(ctx context.Context, in *ReviewInput) (*Signed
 			PrevTag:            in.PrevTag,
 			LatestTag:          in.LatestTag,
 			DiffSHA256:         diffHex,
-			Diff:               string(in.DiffBytes),
 			ReviewText:         in.Result.Summary,
 			Malicious:          in.Result.Malicious,
 			MaliciousReasoning: in.Result.MaliciousReasoning,

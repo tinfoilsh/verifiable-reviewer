@@ -26,8 +26,7 @@ Response: a DSSE envelope + Rekor coordinates (`log_index`, `uuid`, fetch URL). 
 
 The signed in-toto Statement (`predicateType: https://tinfoil.sh/predicate/code-review/v1`) contains:
 
-- `subject.digest.sha256` — hash of the diff bytes
-- `predicate.diff` — the full unified diff the LLM actually reviewed (so the envelope is self-contained; verifiers don't need to re-fetch from GitHub to inspect what was judged)
+- `subject.digest.sha256` — sha256 of the diff bytes the TEE fetched (verifiers re-fetch the same `compare/<a>...<b>.diff` URL and confirm the hash matches)
 - `predicate.review_text` / `malicious` / `malicious_reasoning` — LLM judgment
 - `predicate.model` — model name
 - `predicate.tinfoil_attestation` — the full boot-time hardware attestation document
