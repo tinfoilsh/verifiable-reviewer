@@ -6,8 +6,6 @@ import (
 )
 
 type Config struct {
-	ListenAddr string
-
 	// Auth credentials supplied as Tinfoil secrets.
 	TinfoilAPIKey  string // outbound, for the LLM call
 	ReviewerAPIKey string // inbound, required on /review
@@ -35,7 +33,6 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return &Config{
-		ListenAddr:      envOr("LISTEN_ADDR", ":8080"),
 		TinfoilAPIKey:   tinfoilKey,
 		ReviewerAPIKey:  reviewerKey,
 		LLMURL:          envOr("LLM_URL", "https://inference.tinfoil.sh/v1/chat/completions"),

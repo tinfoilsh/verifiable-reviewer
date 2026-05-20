@@ -27,6 +27,8 @@ Response: a DSSE envelope + Rekor coordinates (`log_index`, `uuid`, fetch URL). 
 The signed in-toto Statement (`predicateType: https://tinfoil.sh/predicate/code-review/v1`) contains:
 
 - `subject.digest.sha256` — sha256 of the diff bytes the TEE fetched (verifiers re-fetch the same `compare/<a>...<b>.diff` URL and confirm the hash matches)
+- `predicate.diff_bytes` — raw byte length of the fetched diff
+- `predicate.truncated` / `predicate.omitted_files` — true when the diff exceeded the LLM packing budget and some files were dropped from the model's input
 - `predicate.review_text` / `malicious` / `malicious_reasoning` — LLM judgment
 - `predicate.model` — model name
 - `predicate.tinfoil_attestation` — the full boot-time hardware attestation document
@@ -42,8 +44,8 @@ Steps 2 + 4 prove the signature came from a key that lived inside the measured e
 
 ## Operational notes
 
-- TLS key is bind-mounted at `/tinfoil/tls.key` because `tinfoil-config.yml` sets `enable-app-signing: true`. Container compromise leaks the key — opt-in is intentional.
-- Boot-time attestation document is read once at startup from `/tinfoil/attestation.json` and embedded verbatim in every signed envelope. No per-request shim round-trip.
+- TLS key is bind-mounted at `/tinfoil/tls.key` because `tinfoil-config.yml` sets `enable-app-signing: true`.
+- Boot-time attestation document is read once at startup from `/tinfoil/attestation.json` and embedded verbatim in every signed envelope.
 - Outbound network: `inference.tinfoil.sh` (LLM), `rekor.sigstore.dev` (publishing), and `github.com` + `codeload.github.com` (diff fetch — the compare URL 302s from the former to the latter).
 
 ## Configuration
@@ -58,4 +60,3 @@ Optional:
 - `LLM_URL` (default `https://inference.tinfoil.sh/v1/chat/completions`)
 - `LLM_MODEL` (default `gpt-oss-120b`)
 - `REKOR_URL` (default `https://rekor.sigstore.dev`)
-- `LISTEN_ADDR` (default `:8080`)

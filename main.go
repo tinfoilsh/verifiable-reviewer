@@ -37,12 +37,13 @@ func main() {
 	})
 	mux.Handle("/review", requireAPIKey(cfg.ReviewerAPIKey, handleReview(gh, llm, publisher)))
 
+	const listenAddr = ":8080"
 	srv := &http.Server{
-		Addr:              cfg.ListenAddr,
+		Addr:              listenAddr,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	log.Printf("listening on %s", cfg.ListenAddr)
+	log.Printf("listening on %s", listenAddr)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("server: %v", err)
 	}
