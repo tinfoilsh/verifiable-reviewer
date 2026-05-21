@@ -69,7 +69,7 @@ func requireAPIKey(want string, next http.Handler) http.Handler {
 type reviewRequest struct {
 	Repo      string `json:"repo"`
 	PrevTag   string `json:"prev_tag"`
-	LatestTag string `json:"latest_tag"`
+	CurrentTag string `json:"current_tag"`
 }
 
 func handleReview(gh *GitHubFetcher, llm *LLMClient, publisher *Publisher) http.Handler {
@@ -84,8 +84,8 @@ func handleReview(gh *GitHubFetcher, llm *LLMClient, publisher *Publisher) http.
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON: %v", err))
 			return
 		}
-		if req.Repo == "" || req.PrevTag == "" || req.LatestTag == "" {
-			writeError(w, http.StatusBadRequest, "repo, prev_tag, and latest_tag are required")
+		if req.Repo == "" || req.PrevTag == "" || req.CurrentTag == "" {
+			writeError(w, http.StatusBadRequest, "repo, prev_tag, and current_tag are required")
 			return
 		}
 
@@ -96,9 +96,9 @@ func handleReview(gh *GitHubFetcher, llm *LLMClient, publisher *Publisher) http.
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Minute)
 		defer cancel()
 
-		diffBytes, err := gh.FetchDiff(ctx, req.Repo, req.PrevTag, req.LatestTag)
+		diffBytes, err := gh.FetchDiff(ctx, req.Repo, req.PrevTag, req.CurrentTag)
 		if err != nil {
-			log.Printf("review %s %s→%s: fetch: %v", req.Repo, req.PrevTag, req.LatestTag, err)
+			log.Printf("review %s %s→%s: fetch: %v", req.Repo, req.PrevTag, req.CurrentTag, err)
 			writeError(w, http.StatusBadGateway, "diff fetch failed")
 			return
 		}
@@ -108,10 +108,10 @@ func handleReview(gh *GitHubFetcher, llm *LLMClient, publisher *Publisher) http.
 			return
 		}
 
-		rctx := &ReviewContext{Repo: req.Repo, Prev: req.PrevTag, Latest: req.LatestTag}
+		rctx := &ReviewContext{Repo: req.Repo, Prev: req.PrevTag, Current: req.CurrentTag}
 		result, err := llm.SummarizeDiff(ctx, files, rctx)
 		if err != nil {
-			log.Printf("review %s %s→%s: llm: %v", req.Repo, req.PrevTag, req.LatestTag, err)
+			log.Printf("review %s %s→%s: llm: %v", req.Repo, req.PrevTag, req.CurrentTag, err)
 			writeError(w, http.StatusBadGateway, "llm call failed")
 			return
 		}
@@ -119,17 +119,17 @@ func handleReview(gh *GitHubFetcher, llm *LLMClient, publisher *Publisher) http.
 		signed, err := publisher.PublishReview(ctx, &ReviewInput{
 			Repo:      req.Repo,
 			PrevTag:   req.PrevTag,
-			LatestTag: req.LatestTag,
+			CurrentTag: req.CurrentTag,
 			DiffBytes: diffBytes,
 			Result:    result,
 		})
 		if err != nil {
-			log.Printf("review %s %s→%s: publish: %v", req.Repo, req.PrevTag, req.LatestTag, err)
+			log.Printf("review %s %s→%s: publish: %v", req.Repo, req.PrevTag, req.CurrentTag, err)
 			writeError(w, http.StatusBadGateway, "rekor publish failed")
 			return
 		}
 
-		log.Printf("review %s %s→%s: %s", req.Repo, req.PrevTag, req.LatestTag, signed.RekorURL)
+		log.Printf("review %s %s→%s: %s", req.Repo, req.PrevTag, req.CurrentTag, signed.RekorURL)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(signed)
 	})

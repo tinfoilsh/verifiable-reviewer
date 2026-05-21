@@ -36,7 +36,7 @@ type inTotoSubject struct {
 type reviewPredicate struct {
 	Repo               string          `json:"repo"`
 	PrevTag            string          `json:"prev_tag"`
-	LatestTag          string          `json:"latest_tag"`
+	CurrentTag         string          `json:"current_tag"`
 	DiffSHA256         string          `json:"diff_sha256"`
 	DiffBytes          int             `json:"diff_bytes"`
 	ReviewText         string          `json:"review_text"`
@@ -81,7 +81,7 @@ func NewPublisher(signer *Signer, rekorURL string) *Publisher {
 type ReviewInput struct {
 	Repo      string
 	PrevTag   string
-	LatestTag string
+	CurrentTag string
 	DiffBytes []byte
 	Result    *ReviewResult
 }
@@ -101,13 +101,13 @@ func (p *Publisher) PublishReview(ctx context.Context, in *ReviewInput) (*Signed
 		Type:          inTotoStatementType,
 		PredicateType: predicateType,
 		Subject: []inTotoSubject{{
-			Name:   fmt.Sprintf("%s@%s", in.Repo, in.LatestTag),
+			Name:   fmt.Sprintf("%s@%s", in.Repo, in.CurrentTag),
 			Digest: map[string]string{"sha256": diffHex},
 		}},
 		Predicate: reviewPredicate{
 			Repo:               in.Repo,
 			PrevTag:            in.PrevTag,
-			LatestTag:          in.LatestTag,
+			CurrentTag:          in.CurrentTag,
 			DiffSHA256:         diffHex,
 			DiffBytes:          len(in.DiffBytes),
 			ReviewText:         in.Result.Summary,

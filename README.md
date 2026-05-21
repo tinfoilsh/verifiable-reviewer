@@ -14,11 +14,11 @@ Prove _this exact diff was reviewed by this exact prompt, and this is what it co
 {
   "repo": "tinfoilsh/cvmimage",
   "prev_tag": "v0.4.1",
-  "latest_tag": "v0.4.2"
+  "current_tag": "v0.4.2"
 }
 ```
 
-The reviewer fetches `https://github.com/<repo>/compare/<prev_tag>...<latest_tag>.diff` itself and hashes those bytes as the in-toto subject. The caller never supplies the diff, so the attestation can't be tricked into signing over bytes that don't match the named commit range — a verifier re-fetching the same URL gets the same bytes and re-derives the same hash.
+The reviewer fetches `https://github.com/<repo>/compare/<prev_tag>...<current_tag>.diff` itself and hashes those bytes as the in-toto subject. The caller never supplies the diff, so the attestation can't be tricked into signing over bytes that don't match the named commit range — a verifier re-fetching the same URL gets the same bytes and re-derives the same hash.
 
 Response: a DSSE envelope + Rekor coordinates (`log_index`, `uuid`, fetch URL). A `202` instead of `200` means the envelope is signed but Rekor publication failed; the envelope can be retried out of band.
 

@@ -13,7 +13,7 @@ import (
 const maxDiffBytes = 10 << 20 // 10 MiB
 
 // GitHubFetcher pulls release diffs from the github.com `.diff` endpoint.
-// Anyone with the (repo, prev, latest) tuple can re-fetch the exact same
+// Anyone with the (repo, prev, current) tuple can re-fetch the exact same
 // bytes later, which is what lets a verifier re-derive the subject hash.
 type GitHubFetcher struct {
 	httpClient *http.Client
@@ -23,12 +23,12 @@ func NewGitHubFetcher() *GitHubFetcher {
 	return &GitHubFetcher{httpClient: &http.Client{Timeout: 60 * time.Second}}
 }
 
-// FetchDiff returns the unified diff bytes for repo's prev..latest compare URL.
+// FetchDiff returns the unified diff bytes for repo's prev..current compare URL.
 // github.com 302s to codeload.github.com for the body — both must be on the
 // shim's egress allowlist.
-func (g *GitHubFetcher) FetchDiff(ctx context.Context, repo, prev, latest string) ([]byte, error) {
+func (g *GitHubFetcher) FetchDiff(ctx context.Context, repo, prev, current string) ([]byte, error) {
 	endpoint := fmt.Sprintf("https://github.com/%s/compare/%s...%s.diff",
-		repo, url.PathEscape(prev), url.PathEscape(latest))
+		repo, url.PathEscape(prev), url.PathEscape(current))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
