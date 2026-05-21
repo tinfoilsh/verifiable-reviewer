@@ -120,20 +120,12 @@ func handleReview(gh *GitHubFetcher, llm *LLMClient, publisher *Publisher) http.
 			Result:    result,
 		})
 		if err != nil {
-			// Envelope is signed regardless; rekor publish failure is partial.
 			log.Printf("review %s %s→%s: publish: %v", req.Repo, req.PrevTag, req.LatestTag, err)
-			if signed == nil {
-				writeError(w, http.StatusInternalServerError, "envelope signing failed")
-				return
-			}
-			// Return 202: envelope is valid, log entry is missing.
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusAccepted)
-			_ = json.NewEncoder(w).Encode(signed)
+			writeError(w, http.StatusBadGateway, "rekor publish failed")
 			return
 		}
 
-		log.Printf("review %s %s→%s: published log_index=%d", req.Repo, req.PrevTag, req.LatestTag, signed.LogIndex)
+		log.Printf("review %s %s→%s: %s", req.Repo, req.PrevTag, req.LatestTag, signed.RekorURL)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(signed)
 	})

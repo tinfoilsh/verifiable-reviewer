@@ -86,12 +86,10 @@ type ReviewInput struct {
 	Result    *ReviewResult
 }
 
-// SignedReview is the response returned to /review callers.
+// SignedReview is the response returned to /review callers. Just a pointer
+// to the Rekor entry.
 type SignedReview struct {
-	Envelope dsseEnvelope `json:"envelope"`
-	RekorURL string       `json:"rekor_url,omitempty"`
-	LogIndex int64        `json:"log_index,omitempty"`
-	UUID     string       `json:"uuid,omitempty"`
+	RekorURL string `json:"rekor_url"`
 }
 
 // PublishReview builds the in-toto statement, DSSE-signs it, and pushes to Rekor.
@@ -135,16 +133,11 @@ func (p *Publisher) PublishReview(ctx context.Context, in *ReviewInput) (*Signed
 
 	rekorResp, err := p.pushToRekor(ctx, envelope)
 	if err != nil {
-		// Surface the failure but still return the envelope — callers can
-		// retry the push or store the envelope out of band.
-		return &SignedReview{Envelope: envelope}, fmt.Errorf("rekor push failed: %w", err)
+		return nil, fmt.Errorf("rekor push failed: %w", err)
 	}
 
 	return &SignedReview{
-		Envelope: envelope,
 		RekorURL: fmt.Sprintf("%s/api/v1/log/entries/%s", p.rekorURL, rekorResp.UUID),
-		LogIndex: rekorResp.LogIndex,
-		UUID:     rekorResp.UUID,
 	}, nil
 }
 
