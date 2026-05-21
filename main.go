@@ -89,7 +89,11 @@ func handleReview(gh *GitHubFetcher, llm *LLMClient, publisher *Publisher) http.
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+		// 15-min hard cap. Visibility times out its own HTTP request at 5 min
+		// and switches to polling Rekor by hash, so any value > 5 min lets
+		// the reviewer keep grinding past the client deadline. 15 min covers
+		// almost any plausible LLM-slowness scenario before we give up.
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Minute)
 		defer cancel()
 
 		diffBytes, err := gh.FetchDiff(ctx, req.Repo, req.PrevTag, req.LatestTag)
