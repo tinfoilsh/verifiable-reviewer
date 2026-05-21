@@ -4,12 +4,7 @@ memory: 2048
 
 networks:
   web:
-    egress: allowlist
-    allow:
-      - inference.tinfoil.sh # LLM
-      - rekor.sigstore.dev # transparency log
-      - github.com # diff fetch (compare/<a>...<b>.diff)
-      - codeload.github.com # github.com 302s here for the diff body
+    egress: open # TEMP: allowlist doesn't support IPv6 yet
 
 containers:
   - name: "verifiable-reviewer"
