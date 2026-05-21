@@ -5,19 +5,18 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"os"
 )
 
-// Signer signs application bytes with the per-boot TLS private key. The key
-// fingerprint is bound into the attestation report's report_data, so signatures
-// chain back to attested code.
+// Signer signs application bytes with the per-boot TLS private key. The
+// matching cert is logged in CT — we record its sha256 so verifiers can locate
+// the CT entry from the Rekor predicate
 type Signer struct {
-	key       *ecdsa.PrivateKey
-	pubKeyDER []byte // SPKI DER, hash is the fingerprint
-	attestDoc json.RawMessage
+	key        *ecdsa.PrivateKey
+	pubKeyDER  []byte   // SPKI DER, hash is the tls_key_fp
+	certSHA256 [32]byte // sha256 of the cert DER
 }
 
 func NewSigner(cfg *Config) (*Signer, error) {
@@ -30,19 +29,15 @@ func NewSigner(cfg *Config) (*Signer, error) {
 		return nil, fmt.Errorf("marshaling pubkey: %w", err)
 	}
 
-	attestBytes, err := os.ReadFile(cfg.AttestationPath)
+	certDER, err := loadCertDER(cfg.TLSCertPath)
 	if err != nil {
-		return nil, fmt.Errorf("reading attestation doc at %s: %w", cfg.AttestationPath, err)
-	}
-	var probe map[string]any
-	if err := json.Unmarshal(attestBytes, &probe); err != nil {
-		return nil, fmt.Errorf("attestation doc is not valid JSON: %w", err)
+		return nil, fmt.Errorf("loading TLS cert: %w", err)
 	}
 
 	return &Signer{
-		key:       key,
-		pubKeyDER: pubDER,
-		attestDoc: json.RawMessage(attestBytes),
+		key:        key,
+		pubKeyDER:  pubDER,
+		certSHA256: sha256.Sum256(certDER),
 	}, nil
 }
 
@@ -59,10 +54,10 @@ func (s *Signer) KeyFingerprint() [32]byte {
 	return sha256.Sum256(s.pubKeyDER)
 }
 
-// AttestationDoc returns the boot-time attestation document as raw JSON,
-// for embedding verbatim into the in-toto predicate.
-func (s *Signer) AttestationDoc() json.RawMessage {
-	return s.attestDoc
+// CertSHA256 returns sha256 of the leaf cert's DER encoding — the same
+// fingerprint crt.sh / openssl x509 -fingerprint -sha256 produce.
+func (s *Signer) CertSHA256() [32]byte {
+	return s.certSHA256
 }
 
 // PublicKeyPEM returns the signing public key as a PEM-encoded SPKI block,
@@ -90,4 +85,19 @@ func loadECKey(path string) (*ecdsa.PrivateKey, error) {
 		return ec, nil
 	}
 	return x509.ParseECPrivateKey(block.Bytes)
+}
+
+func loadCertDER(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, fmt.Errorf("no PEM block in %s", path)
+	}
+	if block.Type != "CERTIFICATE" {
+		return nil, fmt.Errorf("expected CERTIFICATE PEM block in %s, got %q", path, block.Type)
+	}
+	return block.Bytes, nil
 }

@@ -34,19 +34,19 @@ type inTotoSubject struct {
 }
 
 type reviewPredicate struct {
-	Repo               string          `json:"repo"`
-	PrevTag            string          `json:"prev_tag"`
-	CurrentTag         string          `json:"current_tag"`
-	DiffSHA256         string          `json:"diff_sha256"`
-	DiffBytes          int             `json:"diff_bytes"`
-	ReviewText         string          `json:"review_text"`
-	Malicious          string          `json:"malicious"`
-	MaliciousReasoning string          `json:"malicious_reasoning"`
-	Model              string          `json:"model"`
-	Truncated          bool            `json:"truncated"`
-	OmittedFiles       []string        `json:"omitted_files,omitempty"`
-	Timestamp          string          `json:"ts"`
-	TinfoilAttestation json.RawMessage `json:"tinfoil_attestation"`
+	Repo               string   `json:"repo"`
+	PrevTag            string   `json:"prev_tag"`
+	CurrentTag         string   `json:"current_tag"`
+	DiffSHA256         string   `json:"diff_sha256"`
+	DiffBytes          int      `json:"diff_bytes"`
+	ReviewText         string   `json:"review_text"`
+	Malicious          string   `json:"malicious"`
+	MaliciousReasoning string   `json:"malicious_reasoning"`
+	Model              string   `json:"model"`
+	Truncated          bool     `json:"truncated"`
+	OmittedFiles       []string `json:"omitted_files,omitempty"`
+	Timestamp          string   `json:"ts"`
+	CertSHA256         string   `json:"cert_sha256"`
 }
 
 // dsseEnvelope is the on-the-wire DSSE format (Dead Simple Signing Envelope).
@@ -79,11 +79,11 @@ func NewPublisher(signer *Signer, rekorURL string) *Publisher {
 // ReviewInput is everything envelope.go needs from the caller to build a
 // statement: identity of what was reviewed plus the LLM's result.
 type ReviewInput struct {
-	Repo      string
-	PrevTag   string
+	Repo       string
+	PrevTag    string
 	CurrentTag string
-	DiffBytes []byte
-	Result    *ReviewResult
+	DiffBytes  []byte
+	Result     *ReviewResult
 }
 
 // SignedReview is the response returned to /review callers. Just a pointer
@@ -96,6 +96,7 @@ type SignedReview struct {
 func (p *Publisher) PublishReview(ctx context.Context, in *ReviewInput) (*SignedReview, error) {
 	diffHash := sha256.Sum256(in.DiffBytes)
 	diffHex := hex.EncodeToString(diffHash[:])
+	certHash := p.signer.CertSHA256()
 
 	statement := inTotoStatement{
 		Type:          inTotoStatementType,
@@ -107,7 +108,7 @@ func (p *Publisher) PublishReview(ctx context.Context, in *ReviewInput) (*Signed
 		Predicate: reviewPredicate{
 			Repo:               in.Repo,
 			PrevTag:            in.PrevTag,
-			CurrentTag:          in.CurrentTag,
+			CurrentTag:         in.CurrentTag,
 			DiffSHA256:         diffHex,
 			DiffBytes:          len(in.DiffBytes),
 			ReviewText:         in.Result.Summary,
@@ -117,7 +118,7 @@ func (p *Publisher) PublishReview(ctx context.Context, in *ReviewInput) (*Signed
 			Truncated:          in.Result.Truncated,
 			OmittedFiles:       in.Result.OmittedFiles,
 			Timestamp:          time.Now().UTC().Format(time.RFC3339),
-			TinfoilAttestation: p.signer.AttestationDoc(),
+			CertSHA256:         hex.EncodeToString(certHash[:]),
 		},
 	}
 

@@ -31,21 +31,20 @@ The signed in-toto Statement (`predicateType: https://tinfoil.sh/predicate/code-
 - `predicate.truncated` / `predicate.omitted_files` — true when the diff exceeded the LLM packing budget and some files were dropped from the model's input
 - `predicate.review_text` / `malicious` / `malicious_reasoning` — LLM judgment
 - `predicate.model` — model name
-- `predicate.tinfoil_attestation` — the full boot-time hardware attestation document
+- `predicate.cert_sha256` — sha256 fingerprint of the enclave's TLS cert. The cert is the durable home of the hardware attestation report: at boot the enclave's report (with `report_data.tls_key_fp = sha256(pubkey)`) is dcode-encoded into the cert's SAN extension, the cert is issued by a public CA, and the issuance is logged in CT. The fingerprint here is how a verifier locates the right CT entry.
 
-The DSSE signature is made with the per-boot TLS key, whose fingerprint is bound into the attestation report's `report_data.tls_key_fp`. To verify a published entry:
+The DSSE signature is made with that same per-boot TLS key. To verify a published entry:
 
-1. Fetch the DSSE envelope from Rekor.
-2. Verify the signature against the cert/key in `predicate.tinfoil_attestation.certificate`.
-3. Verify the embedded attestation report's hardware measurements against the expected `verifiable-reviewer` image measurement (published by `measure-image-action` at release time).
+1. Fetch the DSSE envelope from Rekor and the cert from CT (e.g., `crt.sh/?q=<cert_sha256>`).
+2. Verify the DSSE signature against the cert's public key.
+3. Decode the attestation report from the cert's SAN extension and verify its hardware measurements against the published `verifiable-reviewer` image measurement (the Sigstore bundle from `measure-image-action`).
 4. Confirm `sha256(cert.PublicKey) == report_data.tls_key_fp`.
 
 Steps 2 + 4 prove the signature came from a key that lived inside the measured enclave. Step 3 proves the measured enclave is running this repo's code.
 
 ## Operational notes
 
-- TLS key is bind-mounted at `/tinfoil/tls.key` because `tinfoil-config.yml` sets `enable-app-signing: true`.
-- Boot-time attestation document is read once at startup from `/tinfoil/attestation.json` and embedded verbatim in every signed envelope.
+- TLS key + matching cert are bind-mounted at `/tinfoil-app/tls.key` and `/tinfoil-app/tls.crt` via `tinfoil-config.yml`'s `volumes` (mode 0600 key, run as root). The cert is hashed once at startup; the hash goes into every envelope's `predicate.cert_sha256`.
 - Outbound network: `inference.tinfoil.sh` (LLM), `rekor.sigstore.dev` (publishing), and `github.com` + `codeload.github.com` (diff fetch — the compare URL 302s from the former to the latter).
 
 ## Configuration

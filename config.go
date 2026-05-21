@@ -14,12 +14,12 @@ type Config struct {
 	LLMModel string
 	RekorURL string
 
-	// In-container paths produced by boot. TLSKeyPath is only present
-	// when tinfoil-config has enable-app-signing: true. AttestationPath
-	// is the boot-time attestation document; both live under /tinfoil
-	// (bind-mounted read-only by the shim).
-	TLSKeyPath      string
-	AttestationPath string
+	// In-container paths produced by boot. The TLS key and matching cert
+	// are bind-mounted in by tinfoil-config.yml. The cert is the one
+	// recorded in CT (with the attestation in its SAN extension); we hash
+	// it so verifiers can locate the CT entry from the Rekor predicate.
+	TLSKeyPath  string
+	TLSCertPath string
 }
 
 func LoadConfig() (*Config, error) {
@@ -33,13 +33,13 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return &Config{
-		TinfoilAPIKey:   tinfoilKey,
-		ReviewerAPIKey:  reviewerKey,
-		LLMURL:          envOr("LLM_URL", "https://inference.tinfoil.sh/v1/chat/completions"),
-		LLMModel:        envOr("LLM_MODEL", "gpt-oss-120b"),
-		RekorURL:        envOr("REKOR_URL", "https://rekor.sigstore.dev"),
-		TLSKeyPath:      envOr("TLS_KEY_PATH", "/tinfoil-app/tls.key"),
-		AttestationPath: envOr("ATTESTATION_PATH", "/tinfoil/attestation.json"),
+		TinfoilAPIKey:  tinfoilKey,
+		ReviewerAPIKey: reviewerKey,
+		LLMURL:         envOr("LLM_URL", "https://inference.tinfoil.sh/v1/chat/completions"),
+		LLMModel:       envOr("LLM_MODEL", "gpt-oss-120b"),
+		RekorURL:       envOr("REKOR_URL", "https://rekor.sigstore.dev"),
+		TLSKeyPath:     envOr("TLS_KEY_PATH", "/tinfoil-app/tls.key"),
+		TLSCertPath:    envOr("TLS_CERT_PATH", "/tinfoil-app/tls.crt"),
 	}, nil
 }
 
