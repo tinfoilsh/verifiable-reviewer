@@ -174,26 +174,37 @@ type rekorEntryResponse struct {
 	LogIndex int64
 }
 
-// pushToRekor submits a DSSE entry to Rekor's POST /api/v1/log/entries.
+// pushToRekor submits an intoto v0.0.2 entry to Rekor's POST /api/v1/log/entries.
 // The response is keyed by UUID; we pull logIndex out of the entry body.
+//
+// Why intoto v0.0.2 rather than dsse v0.0.1: dsse keeps only hashes of the
+// envelope, never the payload bytes. intoto v0.0.2 stores the decoded
+// in-toto Statement inline when it's under Rekor's max_attestation_size
+// (100 KiB on the public instance), so the LLM review text comes back from
+// a plain GET on the rekor_url.
 func (p *Publisher) pushToRekor(ctx context.Context, env dsseEnvelope) (*rekorEntryResponse, error) {
-	envBytes, err := json.Marshal(env)
-	if err != nil {
-		return nil, fmt.Errorf("marshal envelope: %w", err)
-	}
+	pubKeyB64 := base64.StdEncoding.EncodeToString(p.signer.PublicKeyPEM())
 
-	// Rekor verifiers[] only needs what's required to validate the DSSE
-	// signature, so we ship the bare SPKI. The full cert (carrying the
-	// attestation in its SAN) lives in CT, addressable via
-	// predicate.cert_sha256.
+	// intoto v0.0.2 nests the DSSE envelope under spec.content.envelope and
+	// requires each signature object to carry its own publicKey. The signed
+	// bytes (PAE over payloadType+payload) are unaffected by this re-shape.
+	sigs := make([]map[string]any, 0, len(env.Signatures))
+	for _, s := range env.Signatures {
+		sigs = append(sigs, map[string]any{
+			"sig":       s.Sig,
+			"publicKey": pubKeyB64,
+			"keyid":     s.KeyID,
+		})
+	}
 	entry := map[string]any{
-		"kind":       "dsse",
-		"apiVersion": "0.0.1",
+		"kind":       "intoto",
+		"apiVersion": "0.0.2",
 		"spec": map[string]any{
-			"proposedContent": map[string]any{
-				"envelope": string(envBytes),
-				"verifiers": []string{
-					base64.StdEncoding.EncodeToString(p.signer.PublicKeyPEM()),
+			"content": map[string]any{
+				"envelope": map[string]any{
+					"payloadType": env.PayloadType,
+					"payload":     env.Payload,
+					"signatures":  sigs,
 				},
 			},
 		},
