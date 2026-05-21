@@ -11,12 +11,12 @@ import (
 )
 
 // Signer signs application bytes with the per-boot TLS private key. The
-// matching cert is logged in CT — we record its sha256 so verifiers can locate
-// the CT entry from the Rekor predicate
+// matching cert (with the attestation in its SAN) lives in CT; we only
+// record its sha256 in the predicate so verifiers can locate it.
 type Signer struct {
 	key        *ecdsa.PrivateKey
 	pubKeyDER  []byte   // SPKI DER, hash is the tls_key_fp
-	certSHA256 [32]byte // sha256 of the cert DER
+	certSHA256 [32]byte // sha256 of the cert DER, points to the CT entry
 }
 
 func NewSigner(cfg *Config) (*Signer, error) {
@@ -60,10 +60,12 @@ func (s *Signer) CertSHA256() [32]byte {
 	return s.certSHA256
 }
 
-// PublicKeyPEM returns the signing public key as a PEM-encoded SPKI block,
-// suitable for the `verifiers` field on a Rekor DSSE entry.
-func (s *Signer) PublicKeyPEM() ([]byte, error) {
-	return pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: s.pubKeyDER}), nil
+// PublicKeyPEM returns the signing pubkey as a PEM-encoded SPKI block —
+// what Rekor's verifiers[] needs to validate the DSSE signature. The
+// full cert isn't shipped here; verifiers pull it from CT via
+// predicate.cert_sha256.
+func (s *Signer) PublicKeyPEM() []byte {
+	return pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: s.pubKeyDER})
 }
 
 func loadECKey(path string) (*ecdsa.PrivateKey, error) {

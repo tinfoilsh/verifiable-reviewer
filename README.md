@@ -35,12 +35,13 @@ The signed in-toto Statement (`predicateType: https://tinfoil.sh/predicate/code-
 
 The DSSE signature is made with that same per-boot TLS key. To verify a published entry:
 
-1. Fetch the DSSE envelope from Rekor and the cert from CT (e.g., `crt.sh/?q=<cert_sha256>`).
-2. Verify the DSSE signature against the cert's public key.
-3. Decode the attestation report from the cert's SAN extension and verify its hardware measurements against the published `verifiable-reviewer` image measurement (the Sigstore bundle from `measure-image-action`).
-4. Confirm `sha256(cert.PublicKey) == report_data.tls_key_fp`.
+1. Fetch the Rekor entry. It carries the DSSE envelope (with the in-toto Statement as `payload`) and the bare SPKI pubkey in `spec.signatures[].verifier`.
+2. Look the leaf cert up in CT by `predicate.cert_sha256` (e.g., `crt.sh/?q=<cert_sha256>`). Confirm its pubkey matches the Rekor verifier.
+3. Verify the DSSE signature against that pubkey.
+4. Decode the attestation report from the cert's SAN extension and verify its hardware measurements against the published `verifiable-reviewer` image measurement (the Sigstore bundle from `measure-image-action`).
+5. Confirm `sha256(cert.PublicKey) == report_data.tls_key_fp`.
 
-Steps 2 + 4 prove the signature came from a key that lived inside the measured enclave. Step 3 proves the measured enclave is running this repo's code.
+Steps 3 + 5 prove the signature came from a key that lived inside the measured enclave. Step 4 proves the measured enclave is running this repo's code. Step 2 anchors the cert in CT — independent of Rekor.
 
 ## Operational notes
 

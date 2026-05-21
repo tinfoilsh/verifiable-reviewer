@@ -182,15 +182,10 @@ func (p *Publisher) pushToRekor(ctx context.Context, env dsseEnvelope) (*rekorEn
 		return nil, fmt.Errorf("marshal envelope: %w", err)
 	}
 
-	// Rekor's DSSE entry kind (v0.0.1) wants the envelope verbatim under spec.envelope
-	// plus a list of PEM-encoded verifier public keys/certs under spec.signatures[].publicKey.
-	// We don't have a cert to ship (it lives in the embedded attestation_doc), so we
-	// supply the bare SPKI as PEM — Rekor accepts either.
-	pubPEM, err := p.signer.PublicKeyPEM()
-	if err != nil {
-		return nil, fmt.Errorf("encode pubkey: %w", err)
-	}
-
+	// Rekor verifiers[] only needs what's required to validate the DSSE
+	// signature, so we ship the bare SPKI. The full cert (carrying the
+	// attestation in its SAN) lives in CT, addressable via
+	// predicate.cert_sha256.
 	entry := map[string]any{
 		"kind":       "dsse",
 		"apiVersion": "0.0.1",
@@ -198,7 +193,7 @@ func (p *Publisher) pushToRekor(ctx context.Context, env dsseEnvelope) (*rekorEn
 			"proposedContent": map[string]any{
 				"envelope": string(envBytes),
 				"verifiers": []string{
-					base64.StdEncoding.EncodeToString(pubPEM),
+					base64.StdEncoding.EncodeToString(p.signer.PublicKeyPEM()),
 				},
 			},
 		},
