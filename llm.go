@@ -40,7 +40,7 @@ type File struct {
 type ReviewContext struct {
 	Repo   string `json:"repo"`
 	Prev   string `json:"prev"`
-	Latest string `json:"latest"`
+	Current string `json:"current"`
 }
 
 // ReviewResult is the parsed LLM judgment plus packaging metadata.
@@ -120,8 +120,8 @@ func (c *LLMClient) callOnce(ctx context.Context, text string, rctx *ReviewConte
 		if rctx.Repo != "" {
 			header += fmt.Sprintf("Repository: %s\n", rctx.Repo)
 		}
-		if rctx.Prev != "" && rctx.Latest != "" {
-			header += fmt.Sprintf("Diff: %s → %s\n", rctx.Prev, rctx.Latest)
+		if rctx.Prev != "" && rctx.Current != "" {
+			header += fmt.Sprintf("Diff: %s → %s\n", rctx.Prev, rctx.Current)
 		}
 	}
 	userMsg := text

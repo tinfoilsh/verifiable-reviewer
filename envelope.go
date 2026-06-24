@@ -34,18 +34,19 @@ type inTotoSubject struct {
 }
 
 type reviewPredicate struct {
-	Repo               string          `json:"repo"`
-	PrevTag            string          `json:"prev_tag"`
-	LatestTag          string          `json:"latest_tag"`
-	DiffSHA256         string          `json:"diff_sha256"`
-	ReviewText         string          `json:"review_text"`
-	Malicious          string          `json:"malicious"`
-	MaliciousReasoning string          `json:"malicious_reasoning"`
-	Model              string          `json:"model"`
-	Truncated          bool            `json:"truncated"`
-	OmittedFiles       []string        `json:"omitted_files,omitempty"`
-	Timestamp          string          `json:"ts"`
-	TinfoilAttestation json.RawMessage `json:"tinfoil_attestation"`
+	Repo               string   `json:"repo"`
+	PrevTag            string   `json:"prev_tag"`
+	CurrentTag         string   `json:"current_tag"`
+	DiffSHA256         string   `json:"diff_sha256"`
+	DiffBytes          int      `json:"diff_bytes"`
+	ReviewText         string   `json:"review_text"`
+	Malicious          string   `json:"malicious"`
+	MaliciousReasoning string   `json:"malicious_reasoning"`
+	Model              string   `json:"model"`
+	Truncated          bool     `json:"truncated"`
+	OmittedFiles       []string `json:"omitted_files,omitempty"`
+	Timestamp          string   `json:"ts"`
+	CertSHA256         string   `json:"cert_sha256"`
 }
 
 // dsseEnvelope is the on-the-wire DSSE format (Dead Simple Signing Envelope).
@@ -55,9 +56,13 @@ type dsseEnvelope struct {
 	Signatures  []dsseSignature `json:"signatures"`
 }
 
+// dsseSignature: we never set KeyID (rekor's intoto v0.0.1 dsse verifier
+// uses a single-keyed wrapper that matches sigs by *empty* keyid — any
+// non-empty value silently makes the sig unverifiable). `omitempty` keeps
+// the field out of the marshaled envelope entirely.
 type dsseSignature struct {
-	KeyID string `json:"keyid"`
 	Sig   string `json:"sig"` // base64
+	KeyID string `json:"keyid,omitempty"`
 }
 
 // Publisher signs review attestations and pushes them to a Rekor instance.
@@ -78,38 +83,38 @@ func NewPublisher(signer *Signer, rekorURL string) *Publisher {
 // ReviewInput is everything envelope.go needs from the caller to build a
 // statement: identity of what was reviewed plus the LLM's result.
 type ReviewInput struct {
-	Repo      string
-	PrevTag   string
-	LatestTag string
-	DiffBytes []byte
-	Result    *ReviewResult
+	Repo       string
+	PrevTag    string
+	CurrentTag string
+	DiffBytes  []byte
+	Result     *ReviewResult
 }
 
-// SignedReview is the response returned to /review callers.
+// SignedReview is the response returned to /review callers. Just a pointer
+// to the Rekor entry.
 type SignedReview struct {
-	Envelope dsseEnvelope `json:"envelope"`
-	RekorURL string       `json:"rekor_url,omitempty"`
-	LogIndex int64        `json:"log_index,omitempty"`
-	UUID     string       `json:"uuid,omitempty"`
+	RekorURL string `json:"rekor_url"`
 }
 
 // PublishReview builds the in-toto statement, DSSE-signs it, and pushes to Rekor.
 func (p *Publisher) PublishReview(ctx context.Context, in *ReviewInput) (*SignedReview, error) {
 	diffHash := sha256.Sum256(in.DiffBytes)
 	diffHex := hex.EncodeToString(diffHash[:])
+	certHash := p.signer.CertSHA256()
 
 	statement := inTotoStatement{
 		Type:          inTotoStatementType,
 		PredicateType: predicateType,
 		Subject: []inTotoSubject{{
-			Name:   fmt.Sprintf("%s@%s", in.Repo, in.LatestTag),
+			Name:   fmt.Sprintf("%s@%s", in.Repo, in.CurrentTag),
 			Digest: map[string]string{"sha256": diffHex},
 		}},
 		Predicate: reviewPredicate{
 			Repo:               in.Repo,
 			PrevTag:            in.PrevTag,
-			LatestTag:          in.LatestTag,
+			CurrentTag:         in.CurrentTag,
 			DiffSHA256:         diffHex,
+			DiffBytes:          len(in.DiffBytes),
 			ReviewText:         in.Result.Summary,
 			Malicious:          in.Result.Malicious,
 			MaliciousReasoning: in.Result.MaliciousReasoning,
@@ -117,7 +122,7 @@ func (p *Publisher) PublishReview(ctx context.Context, in *ReviewInput) (*Signed
 			Truncated:          in.Result.Truncated,
 			OmittedFiles:       in.Result.OmittedFiles,
 			Timestamp:          time.Now().UTC().Format(time.RFC3339),
-			TinfoilAttestation: p.signer.AttestationDoc(),
+			CertSHA256:         hex.EncodeToString(certHash[:]),
 		},
 	}
 
@@ -133,16 +138,11 @@ func (p *Publisher) PublishReview(ctx context.Context, in *ReviewInput) (*Signed
 
 	rekorResp, err := p.pushToRekor(ctx, envelope)
 	if err != nil {
-		// Surface the failure but still return the envelope — callers can
-		// retry the push or store the envelope out of band.
-		return &SignedReview{Envelope: envelope}, fmt.Errorf("rekor push failed: %w", err)
+		return nil, fmt.Errorf("rekor push failed: %w", err)
 	}
 
 	return &SignedReview{
-		Envelope: envelope,
 		RekorURL: fmt.Sprintf("%s/api/v1/log/entries/%s", p.rekorURL, rekorResp.UUID),
-		LogIndex: rekorResp.LogIndex,
-		UUID:     rekorResp.UUID,
 	}, nil
 }
 
@@ -162,13 +162,11 @@ func (p *Publisher) signEnvelope(payload []byte) (dsseEnvelope, error) {
 		return dsseEnvelope{}, err
 	}
 
-	fp := p.signer.KeyFingerprint()
 	return dsseEnvelope{
 		PayloadType: inTotoPayloadType,
 		Payload:     base64.StdEncoding.EncodeToString(payload),
 		Signatures: []dsseSignature{{
-			KeyID: hex.EncodeToString(fp[:]),
-			Sig:   base64.StdEncoding.EncodeToString(sig),
+			Sig: base64.StdEncoding.EncodeToString(sig),
 		}},
 	}, nil
 }
@@ -178,33 +176,36 @@ type rekorEntryResponse struct {
 	LogIndex int64
 }
 
-// pushToRekor submits a DSSE entry to Rekor's POST /api/v1/log/entries.
+// pushToRekor submits an intoto v0.0.1 entry to Rekor's POST /api/v1/log/entries.
 // The response is keyed by UUID; we pull logIndex out of the entry body.
+//
+// Why intoto v0.0.1 (not v0.0.2 or dsse v0.0.1):
+//   - dsse v0.0.1 never stores the envelope payload, only hashes — so the LLM
+//     review text would be unretrievable from the rekor_url.
+//   - intoto v0.0.2's openapi `format: byte` round-trip (base64 → []byte →
+//     string(bytes)) breaks dsse signature verification with "unable to base64
+//     decode payload" — confirmed empirically.
+//   - intoto v0.0.1 takes the envelope as a JSON string (no double-decode),
+//     ships the pubkey separately at spec.publicKey, and stores the decoded
+//     in-toto Statement inline (returned as `attestation.data` on GET) under
+//     Rekor's 100 KiB attestation cap.
+//
+// Wire quirk: the dsse verifier inside intoto v0.0.1 matches signatures to the
+// single spec.publicKey by *empty* keyid — any non-empty value silently
+// produces "0 of 1 signatures accepted". signEnvelope leaves the field unset.
 func (p *Publisher) pushToRekor(ctx context.Context, env dsseEnvelope) (*rekorEntryResponse, error) {
 	envBytes, err := json.Marshal(env)
 	if err != nil {
 		return nil, fmt.Errorf("marshal envelope: %w", err)
 	}
-
-	// Rekor's DSSE entry kind (v0.0.1) wants the envelope verbatim under spec.envelope
-	// plus a list of PEM-encoded verifier public keys/certs under spec.signatures[].publicKey.
-	// We don't have a cert to ship (it lives in the embedded attestation_doc), so we
-	// supply the bare SPKI as PEM — Rekor accepts either.
-	pubPEM, err := p.signer.PublicKeyPEM()
-	if err != nil {
-		return nil, fmt.Errorf("encode pubkey: %w", err)
-	}
-
 	entry := map[string]any{
-		"kind":       "dsse",
+		"kind":       "intoto",
 		"apiVersion": "0.0.1",
 		"spec": map[string]any{
-			"proposedContent": map[string]any{
+			"content": map[string]any{
 				"envelope": string(envBytes),
-				"verifiers": []string{
-					base64.StdEncoding.EncodeToString(pubPEM),
-				},
 			},
+			"publicKey": base64.StdEncoding.EncodeToString(p.signer.PublicKeyPEM()),
 		},
 	}
 
