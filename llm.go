@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+
+	"github.com/tinfoilsh/tinfoil-go/verifier/client"
 )
 
 const (
@@ -38,8 +40,8 @@ type File struct {
 
 // ReviewContext describes what is being reviewed (used in the LLM prompt header).
 type ReviewContext struct {
-	Repo   string `json:"repo"`
-	Prev   string `json:"prev"`
+	Repo    string `json:"repo"`
+	Prev    string `json:"prev"`
 	Current string `json:"current"`
 }
 
@@ -69,20 +71,31 @@ type chatResponse struct {
 	} `json:"choices"`
 }
 
+// LLMClient wraps a Tinfoil-verified HTTP client. The SDK verifies the
+// inference enclave's attestation (measurement against Sigstore, TLS key
+// binding) before any request is sent, so the LLM call is end-to-end attested.
 type LLMClient struct {
 	httpClient *http.Client
-	url        string
+	enclave    string
 	apiKey     string
 	model      string
 }
 
-func NewLLMClient(cfg *Config) *LLMClient {
+func NewLLMClient(cfg *Config) (*LLMClient, error) {
+	sc := client.NewSecureClient("inference.tinfoil.sh", "tinfoilsh/confidential-model-router")
+	if _, err := sc.Verify(); err != nil {
+		return nil, fmt.Errorf("verify inference enclave: %w", err)
+	}
+	httpClient, err := sc.HTTPClient()
+	if err != nil {
+		return nil, fmt.Errorf("secure http client: %w", err)
+	}
 	return &LLMClient{
-		httpClient: &http.Client{},
-		url:        cfg.LLMURL,
+		httpClient: httpClient,
+		enclave:    sc.Enclave(),
 		apiKey:     cfg.TinfoilAPIKey,
 		model:      cfg.LLMModel,
-	}
+	}, nil
 }
 
 // SummarizeDiff packs files, calls the LLM with retries, and returns a parsed
@@ -140,7 +153,8 @@ func (c *LLMClient) callOnce(ctx context.Context, text string, rctx *ReviewConte
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://"+c.enclave+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("build request: %w", err)
 	}

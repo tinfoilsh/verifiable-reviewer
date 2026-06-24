@@ -48,7 +48,7 @@ Steps 3 + 5 prove the signature came from a key that lived inside the measured e
 ## Operational notes
 
 - TLS key + matching cert are bind-mounted at `/tinfoil-app/tls.key` and `/tinfoil-app/tls.crt` via `tinfoil-config.yml`'s `volumes` (mode 0600 key, run as root). The cert is hashed once at startup; the hash goes into every envelope's `predicate.cert_sha256`.
-- Outbound network: `inference.tinfoil.sh` (LLM), `rekor.sigstore.dev` (publishing), and `github.com` + `codeload.github.com` (diff fetch — the compare URL 302s from the former to the latter).
+- Outbound network: `inference.tinfoil.sh` (LLM, verified via the Tinfoil SDK — the SDK fetches the inference enclave's Sigstore bundle and verifies its attestation before sending the prompt), `rekor.sigstore.dev` (publishing), and `github.com` + `codeload.github.com` (diff fetch — the compare URL 302s from the former to the latter). The SDK also reaches `github.com` and Sigstore for the inference enclave's code measurement.
 
 ## Configuration
 
@@ -59,6 +59,5 @@ Required environment (injected as Tinfoil secrets):
 
 Optional:
 
-- `LLM_URL` (default `https://inference.tinfoil.sh/v1/chat/completions`)
 - `LLM_MODEL` (default `gpt-oss-120b`)
 - `REKOR_URL` (default `https://rekor.sigstore.dev`)
