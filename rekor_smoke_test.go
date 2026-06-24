@@ -16,7 +16,7 @@ import (
 	"testing"
 )
 
-// TestRekorIntotoSubmit posts a synthetic intoto v0.0.2 entry to real Rekor
+// TestRekorIntotoSubmit posts a synthetic intoto v0.0.1 entry to real Rekor
 // to surface the actual rejection reason, bypassing the redeploy loop.
 // Run with: go test -run TestRekorIntotoSubmit -v
 func TestRekorIntotoSubmit(t *testing.T) {
