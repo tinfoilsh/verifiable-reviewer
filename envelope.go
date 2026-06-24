@@ -56,9 +56,13 @@ type dsseEnvelope struct {
 	Signatures  []dsseSignature `json:"signatures"`
 }
 
+// dsseSignature: we never set KeyID (rekor's intoto v0.0.1 dsse verifier
+// uses a single-keyed wrapper that matches sigs by *empty* keyid — any
+// non-empty value silently makes the sig unverifiable). `omitempty` keeps
+// the field out of the marshaled envelope entirely.
 type dsseSignature struct {
-	KeyID string `json:"keyid"`
 	Sig   string `json:"sig"` // base64
+	KeyID string `json:"keyid,omitempty"`
 }
 
 // Publisher signs review attestations and pushes them to a Rekor instance.
@@ -158,13 +162,11 @@ func (p *Publisher) signEnvelope(payload []byte) (dsseEnvelope, error) {
 		return dsseEnvelope{}, err
 	}
 
-	fp := p.signer.KeyFingerprint()
 	return dsseEnvelope{
 		PayloadType: inTotoPayloadType,
 		Payload:     base64.StdEncoding.EncodeToString(payload),
 		Signatures: []dsseSignature{{
-			KeyID: hex.EncodeToString(fp[:]),
-			Sig:   base64.StdEncoding.EncodeToString(sig),
+			Sig: base64.StdEncoding.EncodeToString(sig),
 		}},
 	}, nil
 }
@@ -174,39 +176,36 @@ type rekorEntryResponse struct {
 	LogIndex int64
 }
 
-// pushToRekor submits an intoto v0.0.2 entry to Rekor's POST /api/v1/log/entries.
+// pushToRekor submits an intoto v0.0.1 entry to Rekor's POST /api/v1/log/entries.
 // The response is keyed by UUID; we pull logIndex out of the entry body.
 //
-// Why intoto v0.0.2 rather than dsse v0.0.1: dsse keeps only hashes of the
-// envelope, never the payload bytes. intoto v0.0.2 stores the decoded
-// in-toto Statement inline when it's under Rekor's max_attestation_size
-// (100 KiB on the public instance), so the LLM review text comes back from
-// a plain GET on the rekor_url.
+// Why intoto v0.0.1 (not v0.0.2 or dsse v0.0.1):
+//   - dsse v0.0.1 never stores the envelope payload, only hashes — so the LLM
+//     review text would be unretrievable from the rekor_url.
+//   - intoto v0.0.2's openapi `format: byte` round-trip (base64 → []byte →
+//     string(bytes)) breaks dsse signature verification with "unable to base64
+//     decode payload" — confirmed empirically.
+//   - intoto v0.0.1 takes the envelope as a JSON string (no double-decode),
+//     ships the pubkey separately at spec.publicKey, and stores the decoded
+//     in-toto Statement inline (returned as `attestation.data` on GET) under
+//     Rekor's 100 KiB attestation cap.
+//
+// Wire quirk: the dsse verifier inside intoto v0.0.1 matches signatures to the
+// single spec.publicKey by *empty* keyid — any non-empty value silently
+// produces "0 of 1 signatures accepted". signEnvelope leaves the field unset.
 func (p *Publisher) pushToRekor(ctx context.Context, env dsseEnvelope) (*rekorEntryResponse, error) {
-	pubKeyB64 := base64.StdEncoding.EncodeToString(p.signer.PublicKeyPEM())
-
-	// intoto v0.0.2 nests the DSSE envelope under spec.content.envelope and
-	// requires each signature object to carry its own publicKey. The signed
-	// bytes (PAE over payloadType+payload) are unaffected by this re-shape.
-	sigs := make([]map[string]any, 0, len(env.Signatures))
-	for _, s := range env.Signatures {
-		sigs = append(sigs, map[string]any{
-			"sig":       s.Sig,
-			"publicKey": pubKeyB64,
-			"keyid":     s.KeyID,
-		})
+	envBytes, err := json.Marshal(env)
+	if err != nil {
+		return nil, fmt.Errorf("marshal envelope: %w", err)
 	}
 	entry := map[string]any{
 		"kind":       "intoto",
-		"apiVersion": "0.0.2",
+		"apiVersion": "0.0.1",
 		"spec": map[string]any{
 			"content": map[string]any{
-				"envelope": map[string]any{
-					"payloadType": env.PayloadType,
-					"payload":     env.Payload,
-					"signatures":  sigs,
-				},
+				"envelope": string(envBytes),
 			},
+			"publicKey": base64.StdEncoding.EncodeToString(p.signer.PublicKeyPEM()),
 		},
 	}
 
