@@ -10,7 +10,6 @@ type Config struct {
 	TinfoilAPIKey  string // outbound, for the LLM call
 	ReviewerAPIKey string // inbound, required on /review
 
-	LLMURL   string
 	LLMModel string
 	RekorURL string
 
@@ -35,7 +34,6 @@ func LoadConfig() (*Config, error) {
 	return &Config{
 		TinfoilAPIKey:  tinfoilKey,
 		ReviewerAPIKey: reviewerKey,
-		LLMURL:         envOr("LLM_URL", "https://inference.tinfoil.sh/v1/chat/completions"),
 		LLMModel:       envOr("LLM_MODEL", "gpt-oss-120b"),
 		RekorURL:       envOr("REKOR_URL", "https://rekor.sigstore.dev"),
 		TLSKeyPath:     envOr("TLS_KEY_PATH", "/tinfoil-app/tls.key"),

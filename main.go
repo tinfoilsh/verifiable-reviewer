@@ -27,7 +27,10 @@ func main() {
 	fp := signer.KeyFingerprint()
 	log.Printf("signer ready: tls_key_fp=%x", fp[:8])
 
-	llm := NewLLMClient(cfg)
+	llm, err := NewLLMClient(cfg)
+	if err != nil {
+		log.Fatalf("llm: %v", err)
+	}
 	publisher := NewPublisher(signer, cfg.RekorURL)
 	gh := NewGitHubFetcher()
 
