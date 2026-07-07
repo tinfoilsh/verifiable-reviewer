@@ -1,5 +1,8 @@
 # verifiable-reviewer
 
+> [!WARNING]
+> Work in progress. Reviews are not currently end to end verifiable.
+
 A Tinfoil-attested container that reviews a release diff with an LLM and publishes a signed attestation of the review to Sigstore/Rekor.
 
 ## Why
@@ -22,7 +25,7 @@ The reviewer fetches `https://github.com/<repo>/compare/<prev_tag>...<current_ta
 
 Response: `{"rekor_url": "..."}` — the Rekor entry URL. `200` means the review was signed and published; `502` means Rekor publication failed (nothing is returned to the caller).
 
-## What the attestation actually claims
+## What the attestation claims
 
 The signed in-toto Statement (`predicateType: https://tinfoil.sh/predicate/code-review/v1`) contains:
 
@@ -40,10 +43,10 @@ The DSSE signature is made with that same per-boot TLS key. To verify a publishe
 1. Fetch the Rekor entry (an `intoto` v0.0.1 entry). `spec.publicKey` carries the bare SPKI pubkey; `spec.content.envelope` is the DSSE envelope with the in-toto Statement as its base64 `payload`. The decoded Statement is also returned inline as `attestation.data` on GET.
 2. Look the leaf cert up in CT by `predicate.cert_sha256` (e.g., `crt.sh/?q=<cert_sha256>`). Confirm its pubkey matches the Rekor verifier.
 3. Verify the DSSE signature against that pubkey.
-4. Decode the attestation report from the cert's SAN extension and verify its hardware measurements against the published `verifiable-reviewer` image measurement (the Sigstore bundle from `measure-image-action`).
-5. Confirm `sha256(cert.PublicKey) == report_data.tls_key_fp`.
+   _4. Decode the attestation report from the cert's SAN extension and verify its hardware measurements against the published `verifiable-reviewer` image measurement (the Sigstore bundle from `measure-image-action`)._ (TODO: add the full attestation report to the cert (right now it just has a hash))
+4. Confirm `sha256(cert.PublicKey) == report_data.tls_key_fp`.
 
-Steps 3 + 5 prove the signature came from a key that lived inside the measured enclave. Step 4 proves the measured enclave is running this repo's code. Step 2 anchors the cert in CT — independent of Rekor.
+Steps 3 + 5 prove the signature came from a key that lived inside the measured enclave. Step 4 will prove the measured enclave is running this repo's code. Step 2 anchors the cert in CT — independent of Rekor.
 
 ## Operational notes
 

@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tinfoilsh/tinfoil-go/verifier/client"
+	"github.com/tinfoilsh/tinfoil-go"
 )
 
 const (
@@ -71,9 +71,7 @@ type chatResponse struct {
 	} `json:"choices"`
 }
 
-// LLMClient wraps a Tinfoil-verified HTTP client. The SDK verifies the
-// inference enclave's attestation (measurement against Sigstore, TLS key
-// binding) before any request is sent, so the LLM call is end-to-end attested.
+// LLMClient wraps a Tinfoil-verified HTTP client
 type LLMClient struct {
 	httpClient *http.Client
 	enclave    string
@@ -82,17 +80,17 @@ type LLMClient struct {
 }
 
 func NewLLMClient(cfg *Config) (*LLMClient, error) {
-	sc := client.NewSecureClient("inference.tinfoil.sh", "tinfoilsh/confidential-model-router")
-	if _, err := sc.Verify(); err != nil {
+	tinfoilClient, err := tinfoil.NewClientWithOptions(
+		tinfoil.WithEnclave("inference.tinfoil.sh"),
+		tinfoil.WithRepo("tinfoilsh/confidential-model-router"),
+		tinfoil.WithTransport(tinfoil.TransportTLS),
+	)
+	if err != nil {
 		return nil, fmt.Errorf("verify inference enclave: %w", err)
 	}
-	httpClient, err := sc.HTTPClient()
-	if err != nil {
-		return nil, fmt.Errorf("secure http client: %w", err)
-	}
 	return &LLMClient{
-		httpClient: httpClient,
-		enclave:    sc.Enclave(),
+		httpClient: tinfoilClient.HTTPClient(),
+		enclave:    tinfoilClient.Enclave(),
 		apiKey:     cfg.TinfoilAPIKey,
 		model:      cfg.LLMModel,
 	}, nil
