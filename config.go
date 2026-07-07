@@ -19,6 +19,14 @@ type Config struct {
 	// it so verifiers can locate the CT entry from the Rekor predicate.
 	TLSKeyPath  string
 	TLSCertPath string
+
+	// Attestation document from the CVM's public ramdisk (mounted at /tinfoil).
+	// Published to Rekor once per boot so verifiers can retrieve the historical
+	// attestation without a live enclave.
+	AttestationPath string
+
+	// Writable directory for the boot-attestation flag file.
+	StateDir string
 }
 
 func LoadConfig() (*Config, error) {
@@ -36,8 +44,10 @@ func LoadConfig() (*Config, error) {
 		ReviewerAPIKey: reviewerKey,
 		LLMModel:       envOr("LLM_MODEL", "gpt-oss-120b"),
 		RekorURL:       envOr("REKOR_URL", "https://rekor.sigstore.dev"),
-		TLSKeyPath:     envOr("TLS_KEY_PATH", "/tinfoil-app/tls.key"),
-		TLSCertPath:    envOr("TLS_CERT_PATH", "/tinfoil-app/tls.crt"),
+		TLSKeyPath:      envOr("TLS_KEY_PATH", "/tinfoil-app/tls.key"),
+		TLSCertPath:     envOr("TLS_CERT_PATH", "/tinfoil-app/tls.crt"),
+		AttestationPath: envOr("ATTESTATION_PATH", "/tinfoil/attestation.json"),
+		StateDir:        envOr("STATE_DIR", "/var/lib/verifiable-reviewer"),
 	}, nil
 }
 

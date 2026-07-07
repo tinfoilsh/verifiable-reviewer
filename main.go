@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -32,6 +34,9 @@ func main() {
 		log.Fatalf("llm: %v", err)
 	}
 	publisher := NewPublisher(signer, cfg.RekorURL)
+
+	publishBootAttestation(publisher, cfg)
+
 	gh := NewGitHubFetcher()
 
 	mux := http.NewServeMux()
@@ -142,4 +147,43 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// publishBootAttestation publishes the enclave's attestation document to
+// Rekor as a separate entry keyed by cert_sha256. Runs once at startup;
+// a flag file prevents re-publishing within the same boot (ECDSA signatures
+// are non-deterministic, so Rekor won't deduplicate).
+func publishBootAttestation(publisher *Publisher, cfg *Config) {
+	flagPath := filepath.Join(cfg.StateDir, "attestation-published")
+	certHashHex := publisher.CertSHA256Hex()
+
+	// Skip if already published for this cert
+	if flag, err := os.ReadFile(flagPath); err == nil && strings.TrimSpace(string(flag)) == certHashHex {
+		log.Printf("attestation: already published for cert %s…", certHashHex[:16])
+		return
+	}
+
+	attestationJSON, err := os.ReadFile(cfg.AttestationPath)
+	if err != nil {
+		log.Printf("attestation: no document at %s (skipping): %v", cfg.AttestationPath, err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	url, err := publisher.PublishAttestation(ctx, attestationJSON)
+	if err != nil {
+		log.Printf("attestation: failed to publish: %v", err)
+		return
+	}
+	log.Printf("attestation: published to %s", url)
+
+	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
+		log.Printf("attestation: failed to create state dir: %v", err)
+		return
+	}
+	if err := os.WriteFile(flagPath, []byte(certHashHex), 0o644); err != nil {
+		log.Printf("attestation: failed to write flag: %v", err)
+	}
 }

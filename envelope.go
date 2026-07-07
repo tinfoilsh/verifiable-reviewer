@@ -14,9 +14,10 @@ import (
 )
 
 const (
-	inTotoStatementType = "https://in-toto.io/Statement/v0.1"
-	inTotoPayloadType   = "application/vnd.in-toto+json"
-	predicateType       = "https://tinfoil.sh/predicate/code-review/v1"
+	inTotoStatementType       = "https://in-toto.io/Statement/v0.1"
+	inTotoPayloadType         = "application/vnd.in-toto+json"
+	predicateType             = "https://tinfoil.sh/predicate/code-review/v1"
+	attestationPredicateType  = "https://tinfoil.sh/predicate/enclave-attestation/v1"
 )
 
 // inTotoStatement is the SLSA-style envelope payload: subject names what was
@@ -31,6 +32,29 @@ type inTotoStatement struct {
 type inTotoSubject struct {
 	Name   string            `json:"name"`
 	Digest map[string]string `json:"digest"`
+}
+
+// attestationDoc mirrors verifier.Document{Format,Body} from tinfoil-go.
+// We only need these two fields to compute the .hatt. hash.
+type attestationDoc struct {
+	Format string `json:"format"`
+	Body   string `json:"body"`
+}
+
+// attestationPredicate carries the full attestation document alongside the
+// cert fingerprint and its hash, so a verifier can confirm the document
+// matches the .hatt. SAN in the CT-logged cert without a live enclave.
+type attestationPredicate struct {
+	CertSHA256      string          `json:"cert_sha256"`
+	AttestationHash string          `json:"attestation_hash"`
+	Attestation     json.RawMessage `json:"attestation"`
+}
+
+type attestationStatement struct {
+	Type          string                `json:"_type"`
+	Subject       []inTotoSubject       `json:"subject"`
+	PredicateType string                `json:"predicateType"`
+	Predicate     attestationPredicate  `json:"predicate"`
 }
 
 type reviewPredicate struct {
@@ -144,6 +168,60 @@ func (p *Publisher) PublishReview(ctx context.Context, in *ReviewInput) (*Signed
 	return &SignedReview{
 		RekorURL: fmt.Sprintf("%s/api/v1/log/entries/%s", p.rekorURL, rekorResp.UUID),
 	}, nil
+}
+
+// CertSHA256Hex returns the hex-encoded SHA256 of the leaf cert's DER encoding.
+func (p *Publisher) CertSHA256Hex() string {
+	h := p.signer.CertSHA256()
+	return hex.EncodeToString(h[:])
+}
+
+// PublishAttestation publishes the enclave's attestation document to Rekor
+// as a separate entry keyed by cert_sha256. Called once per boot; the
+// attestation is read from the CVM's public ramdisk (/tinfoil/attestation.json).
+// A verifier searching Rekor by subject.digest.sha256 = cert_sha256 finds
+// this entry and retrieves the full attestation document.
+func (p *Publisher) PublishAttestation(ctx context.Context, attestationJSON []byte) (string, error) {
+	certHashHex := p.CertSHA256Hex()
+
+	// Compute .hatt. hash: sha256(format + body), matching verifier.Document.Hash()
+	var doc attestationDoc
+	if err := json.Unmarshal(attestationJSON, &doc); err != nil {
+		return "", fmt.Errorf("parsing attestation document: %w", err)
+	}
+	docHash := sha256.Sum256([]byte(doc.Format + doc.Body))
+	attestationHash := hex.EncodeToString(docHash[:])
+
+	statement := attestationStatement{
+		Type:          inTotoStatementType,
+		PredicateType: attestationPredicateType,
+		Subject: []inTotoSubject{{
+			Name:   "enclave-cert",
+			Digest: map[string]string{"sha256": certHashHex},
+		}},
+		Predicate: attestationPredicate{
+			CertSHA256:      certHashHex,
+			AttestationHash: attestationHash,
+			Attestation:     json.RawMessage(attestationJSON),
+		},
+	}
+
+	payloadBytes, err := json.Marshal(statement)
+	if err != nil {
+		return "", fmt.Errorf("marshal attestation statement: %w", err)
+	}
+
+	envelope, err := p.signEnvelope(payloadBytes)
+	if err != nil {
+		return "", fmt.Errorf("sign attestation envelope: %w", err)
+	}
+
+	rekorResp, err := p.pushToRekor(ctx, envelope)
+	if err != nil {
+		return "", fmt.Errorf("rekor push failed: %w", err)
+	}
+
+	return fmt.Sprintf("%s/api/v1/log/entries/%s", p.rekorURL, rekorResp.UUID), nil
 }
 
 // signEnvelope wraps payloadBytes in a DSSE envelope using the standard PAE
