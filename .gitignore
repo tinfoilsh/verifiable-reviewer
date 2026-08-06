@@ -1,3 +1,4 @@
 /verifiable-reviewer
 
 .env
+/sanity-check/

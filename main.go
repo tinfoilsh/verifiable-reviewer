@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -27,10 +28,15 @@ func main() {
 	fp := signer.KeyFingerprint()
 	log.Printf("signer ready: tls_key_fp=%x", fp[:8])
 
-	llm, err := NewLLMClient(cfg)
+	tinfoilLLM, err := NewTinfoilLLMClient(cfg)
 	if err != nil {
 		log.Fatalf("llm: %v", err)
 	}
+	llms := map[string]*LLMClient{"tinfoil": tinfoilLLM}
+	if cfg.OpenAIAPIKey != "" {
+		llms["openai"] = NewOpenAILLMClient(cfg)
+	}
+	log.Printf("providers ready: %s", providerNames(llms))
 	publisher := NewPublisher(signer, cfg.RekorURL)
 	gh := NewGitHubFetcher()
 
@@ -38,7 +44,7 @@ func main() {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	mux.Handle("/review", requireAPIKey(cfg.ReviewerAPIKey, handleReview(gh, llm, publisher)))
+	mux.Handle("/review", requireAPIKey(cfg.ReviewerAPIKey, handleReview(gh, llms, publisher)))
 
 	const listenAddr = ":8080"
 	srv := &http.Server{
@@ -68,14 +74,17 @@ func requireAPIKey(want string, next http.Handler) http.Handler {
 // reviewRequest is the wire format on POST /review. The diff is fetched
 // inside the enclave from github.com/<repo>/compare/<prev>...<latest>.diff,
 // so the subject hash is over bytes the TEE pulled itself — not bytes a
-// caller could have substituted.
+// caller could have substituted. provider selects the inference backend
+// ("tinfoil" default, or "openai" when its key is configured); the caller
+// only picks a name — endpoint and model are pinned in reviewer-config.yml.
 type reviewRequest struct {
-	Repo      string `json:"repo"`
-	PrevTag   string `json:"prev_tag"`
+	Repo       string `json:"repo"`
+	PrevTag    string `json:"prev_tag"`
 	CurrentTag string `json:"current_tag"`
+	Provider   string `json:"provider"`
 }
 
-func handleReview(gh *GitHubFetcher, llm *LLMClient, publisher *Publisher) http.Handler {
+func handleReview(gh *GitHubFetcher, llms map[string]*LLMClient, publisher *Publisher) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "POST only")
@@ -89,6 +98,15 @@ func handleReview(gh *GitHubFetcher, llm *LLMClient, publisher *Publisher) http.
 		}
 		if req.Repo == "" || req.PrevTag == "" || req.CurrentTag == "" {
 			writeError(w, http.StatusBadRequest, "repo, prev_tag, and current_tag are required")
+			return
+		}
+		if req.Provider == "" {
+			req.Provider = "tinfoil"
+		}
+		llm, ok := llms[req.Provider]
+		if !ok {
+			writeError(w, http.StatusBadRequest,
+				fmt.Sprintf("unknown or unconfigured provider %q (available: %s)", req.Provider, providerNames(llms)))
 			return
 		}
 
@@ -136,6 +154,15 @@ func handleReview(gh *GitHubFetcher, llm *LLMClient, publisher *Publisher) http.
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(signed)
 	})
+}
+
+func providerNames(llms map[string]*LLMClient) string {
+	names := make([]string, 0, len(llms))
+	for name := range llms {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 func writeError(w http.ResponseWriter, code int, msg string) {

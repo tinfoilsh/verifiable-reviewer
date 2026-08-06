@@ -42,6 +42,8 @@ type reviewPredicate struct {
 	ReviewText         string   `json:"review_text"`
 	Malicious          string   `json:"malicious"`
 	MaliciousReasoning string   `json:"malicious_reasoning"`
+	Provider           string   `json:"provider"`
+	Endpoint           string   `json:"endpoint"`
 	Model              string   `json:"model"`
 	Truncated          bool     `json:"truncated"`
 	OmittedFiles       []string `json:"omitted_files,omitempty"`
@@ -118,6 +120,8 @@ func (p *Publisher) PublishReview(ctx context.Context, in *ReviewInput) (*Signed
 			ReviewText:         in.Result.Summary,
 			Malicious:          in.Result.Malicious,
 			MaliciousReasoning: in.Result.MaliciousReasoning,
+			Provider:           in.Result.Provider,
+			Endpoint:           in.Result.Endpoint,
 			Model:              in.Result.Model,
 			Truncated:          in.Result.Truncated,
 			OmittedFiles:       in.Result.OmittedFiles,

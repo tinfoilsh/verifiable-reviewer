@@ -1,0 +1,8 @@
+# Pinned inference backends for ease of auditability
+providers:
+  tinfoil:
+    endpoint: https://inference.tinfoil.sh
+    model: gpt-oss-120b
+  openai:
+    endpoint: https://api.openai.com
+    model: gpt-5.6-sol

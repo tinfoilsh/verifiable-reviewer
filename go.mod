@@ -2,7 +2,10 @@ module github.com/tinfoilsh/verifiable-reviewer
 
 go 1.26.4
 
-require github.com/tinfoilsh/tinfoil-go v0.13.1
+require (
+	github.com/tinfoilsh/tinfoil-go v0.13.1
+	gopkg.in/yaml.v3 v3.0.1
+)
 
 require (
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
