@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -14,9 +15,16 @@ import (
 )
 
 const (
-	maxDiffChars    = 80_000
-	targetDiffChars = 60_000
-	llmRetries      = 2
+	// Tinfoil inference budget, sized for gpt-oss-120b's context.
+	tinfoilMaxDiffChars    = 80_000
+	tinfoilTargetDiffChars = 60_000
+
+	// OpenAI budget — big-context models, so truncation is a last resort
+	// (the 10 MiB fetch cap in github.go is the outer bound).
+	openaiMaxDiffChars    = 1_500_000
+	openaiTargetDiffChars = 1_200_000
+
+	llmRetries = 2
 )
 
 const systemPrompt = `You are reviewing a release diff from a Tinfoil internal repository. Answer two things:
@@ -50,6 +58,8 @@ type ReviewResult struct {
 	Malicious          string   `json:"malicious"`
 	MaliciousReasoning string   `json:"malicious_reasoning"`
 	Summary            string   `json:"summary"`
+	Provider           string   `json:"provider"`
+	Endpoint           string   `json:"endpoint"`
 	Model              string   `json:"model"`
 	Truncated          bool     `json:"truncated"`
 	OmittedFiles       []string `json:"omitted_files"`
@@ -71,17 +81,28 @@ type chatResponse struct {
 	} `json:"choices"`
 }
 
-// LLMClient wraps a Tinfoil-verified HTTP client
+// LLMClient speaks OpenAI-style chat completions to a pinned endpoint.
+// provider/endpoint/model are recorded in the signed predicate.
 type LLMClient struct {
-	httpClient *http.Client
-	enclave    string
-	apiKey     string
-	model      string
+	httpClient      *http.Client
+	provider        string
+	endpoint        string
+	apiKey          string
+	model           string
+	maxDiffChars    int
+	targetDiffChars int
 }
 
-func NewLLMClient(cfg *Config) (*LLMClient, error) {
+// NewTinfoilLLMClient verifies the inference enclave's attestation and
+// routes all calls through the verified client.
+func NewTinfoilLLMClient(cfg *Config) (*LLMClient, error) {
+	pin := cfg.Providers["tinfoil"]
+	u, err := url.Parse(pin.Endpoint)
+	if err != nil || u.Host == "" {
+		return nil, fmt.Errorf("invalid tinfoil endpoint %q", pin.Endpoint)
+	}
 	tinfoilClient, err := tinfoil.NewClientWithOptions(
-		tinfoil.WithEnclave("inference.tinfoil.sh"),
+		tinfoil.WithEnclave(u.Host),
 		tinfoil.WithRepo("tinfoilsh/confidential-model-router"),
 		tinfoil.WithTransport(tinfoil.TransportTLS),
 	)
@@ -89,17 +110,37 @@ func NewLLMClient(cfg *Config) (*LLMClient, error) {
 		return nil, fmt.Errorf("verify inference enclave: %w", err)
 	}
 	return &LLMClient{
-		httpClient: tinfoilClient.HTTPClient(),
-		enclave:    tinfoilClient.Enclave(),
-		apiKey:     cfg.TinfoilAPIKey,
-		model:      cfg.LLMModel,
+		httpClient:      tinfoilClient.HTTPClient(),
+		provider:        "tinfoil",
+		endpoint:        pin.Endpoint,
+		apiKey:          cfg.TinfoilAPIKey,
+		model:           pin.Model,
+		maxDiffChars:    tinfoilMaxDiffChars,
+		targetDiffChars: tinfoilTargetDiffChars,
 	}, nil
+}
+
+// NewOpenAILLMClient talks plain TLS to the pinned OpenAI endpoint. Less
+// provable than the Tinfoil path — the claim rests on OpenAI serving what
+// its API says — but the endpoint and model are still pinned in the
+// measured image and recorded in the predicate.
+func NewOpenAILLMClient(cfg *Config) *LLMClient {
+	pin := cfg.Providers["openai"]
+	return &LLMClient{
+		httpClient:      &http.Client{},
+		provider:        "openai",
+		endpoint:        pin.Endpoint,
+		apiKey:          cfg.OpenAIAPIKey,
+		model:           pin.Model,
+		maxDiffChars:    openaiMaxDiffChars,
+		targetDiffChars: openaiTargetDiffChars,
+	}
 }
 
 // SummarizeDiff packs files, calls the LLM with retries, and returns a parsed
 // result. Returns an error if all retries fail.
 func (c *LLMClient) SummarizeDiff(ctx context.Context, files []File, rctx *ReviewContext) (*ReviewResult, error) {
-	text, truncated, omitted := packFiles(files)
+	text, truncated, omitted := packFiles(files, c.maxDiffChars, c.targetDiffChars)
 
 	var lastErr error
 	for attempt := 1; attempt <= llmRetries; attempt++ {
@@ -117,6 +158,8 @@ func (c *LLMClient) SummarizeDiff(ctx context.Context, files []File, rctx *Revie
 			Malicious:          stringOr(parsed["malicious"], "unclear"),
 			MaliciousReasoning: stringOr(parsed["malicious_reasoning"], ""),
 			Summary:            stringOr(parsed["summary"], ""),
+			Provider:           c.provider,
+			Endpoint:           c.endpoint,
 			Model:              c.model,
 			Truncated:          truncated,
 			OmittedFiles:       omitted,
@@ -152,7 +195,7 @@ func (c *LLMClient) callOnce(ctx context.Context, text string, rctx *ReviewConte
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://"+c.enclave+"/v1/chat/completions", bytes.NewReader(body))
+		c.endpoint+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("build request: %w", err)
 	}
@@ -184,7 +227,7 @@ func (c *LLMClient) callOnce(ctx context.Context, text string, rctx *ReviewConte
 }
 
 // packFiles renders all files into a single text payload, smallest-first, up to the budget.
-func packFiles(files []File) (text string, truncated bool, omitted []string) {
+func packFiles(files []File, maxDiffChars, targetDiffChars int) (text string, truncated bool, omitted []string) {
 	type rendered struct {
 		path string
 		text string

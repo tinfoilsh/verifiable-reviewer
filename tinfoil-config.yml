@@ -14,6 +14,7 @@ containers:
     secrets:
       - TINFOIL_API_KEY
       - REVIEWER_API_KEY
+      - OPENAI_API_KEY
     volumes:
       - /mnt/ramdisk/private/tls/key.pem:/tinfoil-app/tls.key:ro # boot-time TLS key for in-container signing
       - /mnt/ramdisk/private/tls/cert.pem:/tinfoil-app/tls.crt:ro # matching cert; its sha256 goes into the predicate as a CT pointer
