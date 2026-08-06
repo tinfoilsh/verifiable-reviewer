@@ -8,7 +8,7 @@ networks:
 
 containers:
   - name: "verifiable-reviewer"
-    image: "ghcr.io/tinfoilsh/verifiable-reviewer@sha256:0000000000000000000000000000000000000000000000000000000000000000" # placeholder - populated during release
+    image: "ghcr.io/tinfoilsh/verifiable-reviewer@sha256:c5e8017bfff3977fa973629f63983499c28011d5a488c1cd2f6d574b7eb0dd47" # v0.0.11
     networks: [web]
     user: "0:0" # run as root so we can read the 0600 TLS key bind-mounted below
     secrets:
