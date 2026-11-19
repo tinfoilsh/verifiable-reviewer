@@ -101,16 +101,17 @@ func NewTinfoilLLMClient(cfg *Config) (*LLMClient, error) {
 	if err != nil || u.Host == "" {
 		return nil, fmt.Errorf("invalid tinfoil endpoint %q", pin.Endpoint)
 	}
-	tinfoilClient, err := tinfoil.NewClientWithOptions(
-		tinfoil.WithEnclave(u.Host),
-		tinfoil.WithRepo("tinfoilsh/confidential-model-router"),
-		tinfoil.WithTransport(tinfoil.TransportTLS),
+	tinfoilClient, err := tinfoil.NewEnclaveHTTPClient(
+		context.Background(),
+		u.Host,
+		tinfoil.Pin{Repo: "tinfoilsh/confidential-model-router"},
+		&tinfoil.EnclaveOptions{TransportMode: tinfoil.TransportModeTLS},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("verify inference enclave: %w", err)
 	}
 	return &LLMClient{
-		httpClient:      tinfoilClient.HTTPClient(),
+		httpClient:      tinfoilClient.Client,
 		provider:        "tinfoil",
 		endpoint:        pin.Endpoint,
 		apiKey:          cfg.TinfoilAPIKey,
